@@ -254,3 +254,43 @@ Find the Coupon (XXX%) such that the Monte Carlo price of the note is 98% of its
   - [ ] Compute Greeks: Delta, Gamma, Vega, Rho for the note
   - [ ] Compute coupon sensitivity to market parameters
   - [ ] Generate sensitivity plots
+
+---
+
+# Refactor Volatility Architecture
+
+### 1. Simplify `VolSurface` Class
+- **Goal:** Make `VolSurface` a generic fitter/interpolator.
+- **`__init__`:**
+    - Remove the "Second Pass" for Dupire LV calculation.
+    - Remove `LV_params` and `local_vol_grid`.
+    - Rename `IV_params` to a generic name like `params`.
+- **Methods:**
+    - Delete `gatheral_local_vol_surf`, `dupire_local_vol`, and `dupire_local_vol_surf`.
+- **Cleanup:**
+    - Update `_interp_params` and `vol_surf` to use the new generic `params` and remove the `IV: bool` flag.
+
+### 2. Create `LocalVolCalculator` Class
+- **Goal:** Isolate all local volatility derivation logic.
+- **`__init__`:**
+    - Should accept a fitted `VolSurface` (as an IV surface), `S0`, `r_curve`, and `q_curve`.
+- **Methods:**
+    - Move `gatheral_local_vol_surf` and `dupire_local_vol` from the old `VolSurface` into this class.
+    - Adjust moved methods to get IV data from the stored IV surface object (e.g., `self.iv_surface.vol_surf(...)`).
+    - Create a new method `calculate_dupire_points_grid` to iterate through maturities and run the `dupire_local_vol` calculation, returning a new `points_grid` dictionary.
+
+### 3. Update Main Calibration Cell (Cell 36)
+- **Goal:** Orchestrate the new, decoupled workflow.
+- **Step 1: Build IV Surfaces:**
+    - Create `iv_surfaces` dictionary by initializing `VolSurface` for each index with the market IV data.
+- **Step 2: Calculate Dupire LV Points:**
+    - Create `LocalVolCalculator` instances for each index, passing in the `iv_surfaces`.
+    - Call `calculate_dupire_points_grid` on each calculator to get a dictionary of raw Dupire LV points.
+- **Step 3: Build Dupire LV Surfaces:**
+    - Create a `dupire_lv_surfaces` dictionary by initializing `VolSurface` again, this time with the Dupire LV points.
+
+### 4. Add New Plotting Cell for Dupire LV
+- **Goal:** Visualize the new Dupire LV surface.
+- Duplicate the Gatheral LV plotting cell (Cell 41).
+- Update the title and colormap.
+- Modify the plotting function to pull data from the new `dupire_lv_surfaces` dictionary.

@@ -1,0 +1,270 @@
+classDiagram
+    direction TB
+    
+    %% ========================================
+    %% LAYER 1: Raw Data Containers
+    %% ========================================
+    namespace Layer1_Data {
+        class VolDataPoint {
+            +float m
+            +float T
+            +float vol
+            +float strike
+        }
+        
+        class VolGrid {
+            +list~VolDataPoint~ points
+            +dict T_slices
+            +add_point(m, T, vol, strike)
+            +get_points() list
+            +get_slice(T) list
+            +get_maturities() list
+        }
+    }
+    
+    %% ========================================
+    %% LAYER 2: Parametric Fitting
+    %% ========================================
+    namespace Layer2_Fitting {
+        class SmileFitter {
+            +fit_smile(points) tuple
+            -_tanh_smile(m, a, b, c, d) float
+        }
+        
+        class SurfaceFitter {
+            +SmileFitter smile_fitter
+            +fit(VolGrid) dict
+            -_chain_params(prev, curr)
+        }
+    }
+    
+    %% ========================================
+    %% LAYER 3: Parametric Surface
+    %% ========================================
+    namespace Layer3_Surface {
+        class ParametricVolSurface {
+            +dict param_slices
+            +list T_values
+            +vol(m, T) float
+            +var(m, T) float
+            +total_var(m, T) float
+            -_interpolate_params(T) tuple
+            -_tanh_smile(m, params) float
+        }
+    }
+    
+    %% ========================================
+    %% LAYER 4: Local Vol Calculators
+    %% ========================================
+    namespace Layer4_LocalVol {
+        class DupireLocalVolCalculator {
+            +ParametricVolSurface iv_surf
+            +Callable r
+            +Callable q
+            +float S0
+            +local_vol_at(m, T) float
+            -_get_forward(t) float
+            -_price_from_iv(K, T) float
+        }
+        
+        class GatheralLocalVolCalculator {
+            +ParametricVolSurface iv_surf
+            +local_vol_at(m, T) float
+        }
+    }
+    
+    %% ========================================
+    %% LAYER 5: Grid Sampling
+    %% ========================================
+    namespace Layer5_Sampling {
+        class LocalVolGridSampler {
+            +LocalVolCalculator lv_calc
+            +SurfaceFitter fitter
+            +sample_grid(m_grid, t_grid) VolGrid
+            +sample_and_refit() ParametricVolSurface
+        }
+    }
+    
+    %% ========================================
+    %% LAYER 6: Factory/Orchestrator
+    %% ========================================
+    namespace Layer6_Builder {
+        class VolSurfaceBuilder {
+            +build_iv_surface(VolGrid) ParametricVolSurface
+            +build_lv_surface(ParametricVolSurface, method) ParametricVolSurface
+            +build_full_pipeline(VolGrid) tuple
+        }
+    }
+    
+    %% ========================================
+    %% BACKWARD COMPATIBLE WRAPPER
+    %% ========================================
+    class VolSurface {
+        +ParametricVolSurface iv_surface
+        +ParametricVolSurface lv_surface
+        +__call__(S, t) float
+        +iv(m, T) float
+        +lv(m, T) float
+    }
+    
+    %% ========================================
+    %% UTILITY CLASSES
+    %% ========================================
+    namespace Utilities {
+        class OptionUtils {
+            +implied_var(S, K, T, r, q, price, Call)$ float
+            +implied_vol(S, K, T, r, q, price, Call)$ float
+            +price(S, K, T, r, q, sigma, Call)$ float
+        }
+        
+        class Curves {
+            +CubicSpline cs
+            +CubicSpline cs_inst
+            +__call__(t) float
+            +instant(t) float
+        }
+        
+        class RCurves {
+            <<extends Curves>>
+        }
+        
+        class QCurves {
+            <<extends Curves>>
+        }
+    }
+    
+    %% ========================================
+    %% MARKET DATA
+    %% ========================================
+    namespace MarketData_NS {
+        class MarketData {
+            +dict S0
+            +dict rf
+            +dict div
+            +dict localvols
+            +CorrelationMatrix correlationmatrix
+            +get_spot(asset_id) float
+            +get_rate(asset_id, t) float
+            +get_dividend_yield(asset_id, t) float
+            +get_local_vol(asset_id, S, t) float
+        }
+        
+        class CorrelationMatrix {
+            +ndarray matrix
+            +get_matrix() ndarray
+            +get_cholesky_decomposition() ndarray
+        }
+        
+        class SimulationConfig {
+            +int n_paths
+            +int n_steps
+            +float T
+            +validate()
+            +get_time_steps() int
+        }
+    }
+    
+    %% ========================================
+    %% PATH GENERATION
+    %% ========================================
+    namespace PathGeneration {
+        class PathGenerator {
+            +list S
+            +dict r
+            +dict q
+            +dict Vol
+            +CorrelationMatrix Corr
+            +generate(market_data, config)
+        }
+        
+        class GBMLocalVolPathGenerator {
+            +generate(MarketData, SimulationConfig) ndarray
+        }
+    }
+    
+    %% ========================================
+    %% CONTRACT CLASSES (STUBS)
+    %% ========================================
+    namespace Contract_NS {
+        class Barrier {
+            +ndarray x
+            +ndarray y
+            +bool cont
+            +__call__(t, S) bool
+        }
+        
+        class Payoff {
+            <<abstract>>
+            +calculate(S_path, coupon, dates)
+        }
+        
+        class AutocallablePayoff {
+            +calculate(S_path, coupon, dates)
+        }
+        
+        class Contract {
+            +validate()
+        }
+    }
+    
+    %% ========================================
+    %% PRICING (STUBS)
+    %% ========================================
+    namespace Pricing_NS {
+        class MonteCarloEngine {
+            <<stub>>
+        }
+        
+        class CouponSolver {
+            <<stub>>
+        }
+        
+        class ModelValidator {
+            <<stub>>
+        }
+        
+        class ConvergenceAnalyzer {
+            <<stub>>
+        }
+    }
+    
+    %% ========================================
+    %% RELATIONSHIPS
+    %% ========================================
+    
+    %% Layer dependencies
+    VolGrid *-- VolDataPoint : contains
+    SurfaceFitter --> SmileFitter : uses
+    SurfaceFitter --> VolGrid : fits
+    SurfaceFitter --> ParametricVolSurface : creates
+    
+    DupireLocalVolCalculator --> ParametricVolSurface : uses IV
+    GatheralLocalVolCalculator --> ParametricVolSurface : uses IV
+    
+    LocalVolGridSampler --> DupireLocalVolCalculator : samples from
+    LocalVolGridSampler --> GatheralLocalVolCalculator : samples from
+    LocalVolGridSampler --> SurfaceFitter : refits with
+    LocalVolGridSampler --> VolGrid : creates
+    
+    VolSurfaceBuilder --> SurfaceFitter : uses
+    VolSurfaceBuilder --> LocalVolGridSampler : uses
+    VolSurfaceBuilder --> ParametricVolSurface : creates
+    
+    VolSurface --> ParametricVolSurface : wraps
+    
+    %% Market data relationships
+    MarketData --> VolSurface : contains
+    MarketData --> Curves : contains
+    MarketData --> CorrelationMatrix : contains
+    
+    %% Path generation
+    GBMLocalVolPathGenerator --|> PathGenerator : extends
+    GBMLocalVolPathGenerator --> MarketData : uses
+    GBMLocalVolPathGenerator --> SimulationConfig : uses
+    
+    %% Curve hierarchy
+    RCurves --|> Curves : extends
+    QCurves --|> Curves : extends
+    
+    %% Contract hierarchy
+    AutocallablePayoff --|> Payoff : extends
